@@ -2,28 +2,13 @@
 #include <vector>
 #include <cmath>
 #include <Eigen/Core>
+#include <igl/opengl/glfw/Viewer.h>
+
+#include "constants.h"
 
 extern int p[512];  // Declare the global array p
 extern void init_permutation(int seed);  // Declare the function
 extern float perlin_noise(float x, float y, int seed);  // Declare the function
-
-
-// Generate terrain with Perlin noise (3D grid)
-void generate_terrain(std::vector<std::vector<float>>& terrain, int width, int height, float scale, float& flying) {
-    init_permutation(42);  // Seed for Perlin noise
-    float flyingOffset = flying;
-
-    for (int y = 0; y < height; ++y) {
-        float xoff = 0;
-        for (int x = 0; x < width; ++x) {
-            terrain[x][y] = perlin_noise(xoff, flyingOffset, 0) * 200;  // Increase height scaling for more variation
-            xoff += 0.1f;  // Adjust step size for x-axis noise
-        }
-        flyingOffset += 0.1f;  // Adjust step size for y-axis noise
-    }
-
-    flying -= 0.1f;  // Animate the terrain by adjusting flying offset
-}
 
 // Create terrain mesh (vertices and faces)
 void create_terrain_mesh(const std::vector<std::vector<float>>& terrain, int width, int height, Eigen::MatrixXd& V, Eigen::MatrixXi& F) {
@@ -54,6 +39,23 @@ void create_terrain_mesh(const std::vector<std::vector<float>>& terrain, int wid
             F.row(f++) << v1, v3, v2;
         }
     }
+}
+
+// Generate terrain with Perlin noise (3D grid)
+void generate_terrain(std::vector<std::vector<float>>& terrain, int width, int height, float scale, float& flying) {
+    init_permutation(42);  // Seed for Perlin noise
+    float flyingOffset = flying;
+
+    for (int y = 0; y < height; ++y) {
+        float xoff = 0;
+        for (int x = 0; x < width; ++x) {
+            terrain[x][y] = perlin_noise(xoff, flyingOffset, 0) * 200;  // Increase height scaling for more variation
+            xoff += 0.1f;  // Adjust step size for x-axis noise
+        }
+        flyingOffset += 0.1f;  // Adjust step size for y-axis noise
+    }
+
+    flying -= 0.1f;  // Animate the terrain by adjusting flying offset
 }
 
 Eigen::MatrixXd generate_color_based_on_height(const Eigen::MatrixXd& V, double water_level, double transition_width = 10.0) {
@@ -91,47 +93,57 @@ Eigen::MatrixXd generate_color_based_on_height(const Eigen::MatrixXd& V, double 
     return C;
 }
 
-Eigen::MatrixXd generate_water_visualization(const Eigen::MatrixXd& V, double water_level, double time) {
-    Eigen::MatrixXd C(V.rows(), 3); // RGB colors
 
-    // Water colors
-    Eigen::RowVector3d water_deep(0.0, 0.1, 0.5);    // Deep water - dark blue
-    Eigen::RowVector3d water_shallow(0.0, 0.7, 1.0); // Shallow water - light blue
+// Function to create a flat water surface
+void generate_water_surface(Eigen::MatrixXd& water_V, Eigen::MatrixXi& water_F, const Eigen::MatrixXd& terrain_V, double water_level) {
+    // Create a simple grid matching the terrain size
+    int grid_size = 80; // Adjust for better resolution
+    water_V.resize(grid_size * grid_size, 3);
+    water_F.resize((grid_size - 1) * (grid_size - 1) * 2, 3);
 
-    double wave_frequency = 0.05; // Controls wave density
-    double wave_amplitude = 0.2;  // Controls wave height
-    double wave_speed = 2.0;      // Controls wave movement speed
+    double minX = terrain_V.col(0).minCoeff();
+    double maxX = terrain_V.col(0).maxCoeff();
+    double minY = terrain_V.col(1).minCoeff();
+    double maxY = terrain_V.col(1).maxCoeff();
 
-    for (int i = 0; i < V.rows(); ++i) {
-        double height = V(i, 2);
-        double x = V(i, 0);
-        double y = V(i, 1);
-
-        if (height < water_level) {
-            // Simulating flowing water using sine waves
-            double wave_effect = wave_amplitude * std::sin(wave_frequency * (x + y) + wave_speed * time);
-            double adjusted_depth = water_level - height + wave_effect;
-
-            // Normalize depth for color transition
-            double depth_factor = adjusted_depth / water_level;
-            depth_factor = std::clamp(depth_factor, 0.0, 1.0);
-
-            // Interpolate between deep and shallow water colors
-            C.row(i) = (1 - depth_factor) * water_shallow + depth_factor * water_deep;
+    // Generate grid vertices
+    int index = 0;
+    for (int i = 0; i < grid_size; ++i) {
+        for (int j = 0; j < grid_size; ++j) {
+            double x = minX + (maxX - minX) * i / (grid_size - 1);
+            double y = minY + (maxY - minY) * j / (grid_size - 1);
+            water_V.row(index++) = Eigen::RowVector3d(x, y, water_level);
         }
     }
-    return C;
+
+    // Generate faces
+    index = 0;
+    for (int i = 0; i < grid_size - 1; ++i) {
+        for (int j = 0; j < grid_size - 1; ++j) {
+            int v1 = i * grid_size + j;
+            int v2 = i * grid_size + (j + 1);
+            int v3 = (i + 1) * grid_size + j;
+            int v4 = (i + 1) * grid_size + (j + 1);
+
+            // Triangle 1
+            water_F.row(index++) = Eigen::RowVector3i(v1, v2, v3);
+            // Triangle 2
+            water_F.row(index++) = Eigen::RowVector3i(v2, v4, v3);
+        }
+    }
+
+
 }
 
-Eigen::MatrixXd generate_visualization(const Eigen::MatrixXd& V, double water_level, double time) {
-    Eigen::MatrixXd C = generate_color_based_on_height(V, water_level);
-    Eigen::MatrixXd water = generate_water_visualization(V, water_level, time);
-
-    for (int i = 0; i < V.rows(); ++i) {
-        if (V(i, 2) < water_level) {
-            C.row(i) = water.row(i);
-        }
+// Function to update water height for animation
+void update_water_animation(Eigen::MatrixXd& water_V, Eigen::MatrixXi& water_F, double time, igl::opengl::glfw::Viewer& viewer) {
+    // Update vertex positions to create a wave effect
+    Eigen::MatrixXd new_V = water_V; // Copy original vertices
+    for (int i = 0; i < new_V.rows(); ++i) {
+        // Create a wave effect based on the x-coordinate
+        new_V(i, 2) = 0.1 * std::sin(2 * PI * (new_V(i, 0) + time)); // Wave effect
     }
-    return C;
+
+    viewer.data(1).set_mesh(new_V, water_F);
 }
 

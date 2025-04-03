@@ -4,50 +4,54 @@
 #include <Eigen/Core>
 #include <igl/opengl/glfw/Viewer.h>
 
-extern void generate_terrain(std::vector<std::vector<float>>& terrain, int width, int height, float scale, float& flying);
-extern void create_terrain_mesh(const std::vector<std::vector<float>>& terrain, int width, int height, Eigen::MatrixXd& V, Eigen::MatrixXi& F);
-extern Eigen::MatrixXd generate_visualization(const Eigen::MatrixXd& V, double water_level, double time);
+#include "src/constants.h"
+
+extern void develop_terrain(Eigen::MatrixXd& terrain_V, Eigen::MatrixXi& terrain_F, igl::opengl::glfw::Viewer& viewer);
+extern void develop_water(Eigen::MatrixXd& water_V, Eigen::MatrixXi& water_F, Eigen::MatrixXd& terrain_V, igl::opengl::glfw::Viewer& viewer);
+extern void update_water_animation(Eigen::MatrixXd& water_V, Eigen::MatrixXi& water_F, double time, igl::opengl::glfw::Viewer& viewer);
+
+
 
 int main() {
-    const int width = 100;  // Terrain width (in cells)
-    const int height = 100; // Terrain height (in cells)
-    std::vector<std::vector<float>> terrain(width, std::vector<float>(height));
 
-    Eigen::MatrixXd V;  // Vertex positions (x, y, z)
-    Eigen::MatrixXi F;  // Face indices (connect the vertices into triangles)
+    Eigen::MatrixXd terrain_V;  // Vertex positions (x, y, z)
+    Eigen::MatrixXi terrain_F;  // Face indices (connect the vertices into triangles)
 
-    float flying = 0;  // Animation variable
+    Eigen::MatrixXd water_V;  // Vertex positions (x, y, z)
+    Eigen::MatrixXi water_F;  // Face indices (connect the vertices into triangles)
 
-    // Generate the terrain based on Perlin noise
-    generate_terrain(terrain, width, height, 20.0f, flying);
-    create_terrain_mesh(terrain, width, height, V, F);
 
-    // Generate Mesh Color 
 
-    //double water_level = 3.0;
-    //double snow_level = 5.0;
-    //Eigen::MatrixXd color = generate_visualization(V, water_level);
+    igl::opengl::glfw::Viewer viewer;  // Initialize the libigl viewer
 
-    // Initialize the libigl viewer
-    igl::opengl::glfw::Viewer viewer;
+    develop_terrain(terrain_V, terrain_F, viewer);
 
-    // Set the mesh and color in the viewer
-    // Water level
-    double water_level = 0.5;
+    develop_water(water_V, water_F, terrain_V, viewer);
+
     double time = 0.0;
+    viewer.callback_pre_draw = [&](igl::opengl::glfw::Viewer& viewer) {
+        time += 0.05; // Increment time
+    
+        // Update vertex positions to cbreate a wave effect for the second mesh
+        Eigen::MatrixXd new_V = water_V; // Copy original vertices
+        for (int i = 0; i < new_V.rows(); ++i) {
+            // Create a wave effect based on the x-coordinate
+            new_V(i, 2) = 1 + 10 * std::sin(2 * PI * (new_V(i, 0) + time)); // Wave effect
+        }
+    
+        // Update the mesh in the viewer
+        viewer.data(1).set_mesh(new_V, water_F);
+        return false; // Return false to continue the animation
+    };
 
-    // Callback for animation (runs every frame)
-    viewer.callback_pre_draw = [&](igl::opengl::glfw::Viewer&) -> bool {
-        time += 1; // Increase time for animation
-        Eigen::MatrixXd color = generate_visualization(V, water_level, time);
-        viewer.data().set_colors(color); // Update vertex colors dynamically
-        return false; // Continue rendering
-        };
-    viewer.data().set_mesh(V, F);/*
-    viewer.data().set_colors(color);*/
+    // Enable continuous animation
+    viewer.core().is_animating = true; // Set to true for continuous updates
 
     // Launch the viewer
     viewer.launch();
 
+
     return 0;
 }
+
+
